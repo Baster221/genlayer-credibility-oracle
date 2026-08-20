@@ -8,8 +8,9 @@ It verifies evidence-backed claims with validator consensus, not a thin "AI deci
 
 Why I like this direction:
 - clear claim lifecycle
-- bonded submissions
+- declared bond commitments
 - independent validator re-analysis
+- at least two overlapping material facts before consensus accepts a result
 - stable verdicts: supported, contradicted, unverifiable, stale
 - reusable for grants, bounties, DAO evidence, reputation, and provenance
 

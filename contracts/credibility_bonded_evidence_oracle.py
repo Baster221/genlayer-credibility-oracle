@@ -30,7 +30,7 @@ class ClaimRecord:
     submitter: Address
     claim_text: str
     evidence_url: str
-    bond_atto: u256
+    declared_bond_atto: u256
     status: str
     verdict: str
     confidence: str
@@ -102,7 +102,7 @@ def _tokenize_fact(fact: str) -> set[str]:
 
 
 def _facts_overlap_enough(left_facts: list[str], right_facts: list[str]) -> bool:
-    if len(left_facts) == 0 or len(right_facts) == 0:
+    if len(left_facts) < 2 or len(right_facts) < 2:
         return False
 
     matched = 0
@@ -120,9 +120,7 @@ def _facts_overlap_enough(left_facts: list[str], right_facts: list[str]) -> bool
                 matched += 1
                 break
 
-    required = 1
-    if len(left_facts) >= 3 and len(right_facts) >= 3:
-        required = 2
+    required = 2
     return matched >= required
 
 
@@ -169,8 +167,8 @@ def _parse_analysis(raw: dict) -> dict:
         if len(facts) == 5:
             break
 
-    if len(facts) == 0:
-        raise gl.vm.UserError(f"{ERROR_LLM} Missing material facts")
+    if len(facts) < 2:
+        raise gl.vm.UserError(f"{ERROR_LLM} At least two material facts are required")
 
     return {
         "verdict": verdict,
@@ -214,7 +212,7 @@ class CredibilityBondedEvidenceOracle(gl.Contract):
         claim_id: str,
         claim_text: str,
         evidence_url: str,
-        bond_atto: u256,
+        declared_bond_atto: u256,
         submitted_at: str,
     ) -> None:
         clean_id = _clean_text(claim_id, 80)
@@ -227,7 +225,7 @@ class CredibilityBondedEvidenceOracle(gl.Contract):
             raise gl.UserError(f"{ERROR_EXPECTED} Claim text must be at least 20 characters")
         if not clean_url.startswith("https://") and not clean_url.startswith("http://"):
             raise gl.UserError(f"{ERROR_EXPECTED} Evidence URL must start with http:// or https://")
-        if bond_atto < self.minimum_bond_atto:
+        if declared_bond_atto < self.minimum_bond_atto:
             raise gl.UserError(f"{ERROR_EXPECTED} Bond below minimum")
         if clean_id in self.claims:
             raise gl.UserError(f"{ERROR_EXPECTED} Claim already exists")
@@ -236,7 +234,7 @@ class CredibilityBondedEvidenceOracle(gl.Contract):
             submitter=gl.message.sender_account,
             claim_text=clean_claim,
             evidence_url=clean_url,
-            bond_atto=bond_atto,
+            declared_bond_atto=declared_bond_atto,
             status=STATUS_SUBMITTED,
             verdict="",
             confidence="",
@@ -326,6 +324,11 @@ Rules:
 
         claim.evidence_url = clean_url
         claim.status = STATUS_CHALLENGED
+        claim.verdict = ""
+        claim.confidence = ""
+        claim.summary = ""
+        claim.material_facts_json = "[]"
+        claim.resolved_at = ""
         claim.challenged_by = gl.message.sender_account
         self.claims[claim_id] = claim
 
@@ -351,7 +354,7 @@ Rules:
             "submitter": str(claim.submitter),
             "claim_text": claim.claim_text,
             "evidence_url": claim.evidence_url,
-            "bond_atto": claim.bond_atto,
+            "declared_bond_atto": claim.declared_bond_atto,
             "status": claim.status,
             "verdict": claim.verdict,
             "confidence": claim.confidence,

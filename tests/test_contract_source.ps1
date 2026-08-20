@@ -37,6 +37,13 @@ Assert-Contains -Haystack $Source -Needle "class CredibilityBondedEvidenceOracle
 Assert-Contains -Haystack $Source -Needle "gl.vm.run_nondet_unsafe" -Message "Resolution must use run_nondet_unsafe."
 Assert-Contains -Haystack $Source -Needle "validator_fn" -Message "Resolution must define an independent validator function."
 Assert-Contains -Haystack $Source -Needle "validator_result = analyze_evidence()" -Message "Validator must rerun analysis independently."
+Assert-Contains -Haystack $Source -Needle "declared_bond_atto" -Message "Bond semantics must be explicit as a declared stake commitment."
+Assert-Contains -Haystack $Source -Needle "claim.verdict = `"`"" -Message "Challenge flow must clear stale verdict."
+Assert-Contains -Haystack $Source -Needle "claim.confidence = `"`"" -Message "Challenge flow must clear stale confidence."
+Assert-Contains -Haystack $Source -Needle "claim.summary = `"`"" -Message "Challenge flow must clear stale summary."
+Assert-Contains -Haystack $Source -Needle "claim.material_facts_json = `"[]`"" -Message "Challenge flow must clear stale material facts."
+Assert-Contains -Haystack $Source -Needle "if len(facts) < 2:" -Message "Analysis parser must require at least two material facts."
+Assert-Contains -Haystack $Source -Needle "required = 2" -Message "Fact overlap should require two matches for substantive agreement."
 
 $ExpectedFunctions = @(
     "def _normalize_verdict(",
