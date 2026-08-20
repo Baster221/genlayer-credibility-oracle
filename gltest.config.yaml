@@ -1,0 +1,7 @@
+network: studionet
+endpoint: https://studio.genlayer.com/api
+contracts:
+  credibility_bonded_evidence_oracle:
+    path: contracts/credibility_bonded_evidence_oracle.py
+    constructor_args:
+      - 1000000000000000000

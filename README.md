@@ -1,151 +1,120 @@
 # Credibility-Bonded Evidence Oracle
 
-A standalone GenLayer Intelligent Contract primitive for verifying evidence-backed claims.
+A GenLayer Intelligent Contract primitive for turning messy public evidence into auditable on-chain claim verdicts.
 
-The contract lets builders submit a claim, attach an evidence URL, declare a bond commitment, and resolve the claim through GenLayer consensus. Validators independently read the same evidence and classify the claim as `supported`, `contradicted`, `unverifiable`, or `stale`.
+## Thesis
 
-## Why This Needs GenLayer
+Most useful claims in builder ecosystems are not clean yes/no values. A grant milestone might be partially shipped. A bounty proof might be real but incomplete. A DAO proposal might cite evidence that is accurate but stale. Traditional smart contracts are excellent at deterministic accounting, but they cannot judge whether public evidence actually supports a human claim.
 
-Many builder workflows need a judgment that is too subjective for a deterministic smart contract but too important to leave to a private backend. Examples include grant milestone checks, bounty proof review, reputation attestations, DAO proposal evidence, content provenance, and data-quality assertions.
+This repository explores one reusable shape for that gap:
 
-This contract keeps that judgment on-chain and auditable:
+> Evidence review should be a consensus primitive, not a private backend opinion.
 
-- The contract stores the claim, evidence URL, declared bond commitment, status, verdict, confidence bucket, and material facts.
-- The final verdict is produced by GenLayer consensus, not by the submitter.
-- Validators rerun the evidence analysis independently and compare stable fields.
-- The state transition is minimal and reusable, so other apps can build around it.
+`CredibilityBondedEvidenceOracle` lets a builder submit a claim, attach an evidence URL, declare a stake commitment, and ask GenLayer validators to resolve the claim as `supported`, `contradicted`, `unverifiable`, or `stale`.
 
-## Contract Boundary
+The contract is intentionally standalone. It is not a frontend, not a finished app, and not a generic "AI decides X" example. The core contribution is the contract boundary: non-deterministic evidence judgment happens through GenLayer consensus, while state transitions remain explicit and inspectable.
 
-The frontend or backend owns UI, indexing, user accounts, cached previews, and analytics.
+## What Makes It a Primitive
 
-The external website owns the raw evidence.
+- **Reusable shape:** any app can wrap the oracle for milestone checks, bounty review, DAO evidence, reputation attestations, provenance, or data-quality claims.
+- **Real consensus logic:** resolution uses `gl.vm.run_nondet_unsafe` with a validator that independently repeats the evidence analysis.
+- **Clear state model:** claims move through `submitted`, `resolved`, `challenged`, and `archived`.
+- **Stable comparison fields:** validators compare verdict, confidence bucket, and material fact overlap instead of raw LLM prose.
+- **Fail-safe categories:** the contract can return `unverifiable` or `stale` instead of forcing a weak yes/no answer.
+- **Standalone deployability:** the contract is one GenVM Python file with a pinned runner dependency.
 
-The GenLayer contract owns the authoritative state transition from `submitted` to `resolved`, including the consensus-backed verdict and review metadata.
+## Reviewer Links
 
-## State Machine
+- [Contract source](contracts/credibility_bonded_evidence_oracle.py)
+- [Contract specification](CONTRACT.md)
+- [Engineering decisions](DECISIONS.md)
+- [Testing guide](TESTING.md)
+- [Reviewer guide](docs/reviewer-guide.md)
+- [Integration plan](docs/integration-plan.md)
+- [Source-quality test](tests/test_contract_source.ps1)
 
-`submitted`
-: A claim has been registered with claim text, evidence URL, and a declared bond commitment.
+## Contract at a Glance
 
-`resolved`
-: Consensus produced a verdict, confidence bucket, summary, and material facts.
+| Area | Design |
+| --- | --- |
+| Contract | `CredibilityBondedEvidenceOracle` |
+| Source | `contracts/credibility_bonded_evidence_oracle.py` |
+| Consensus move | Custom validator with `gl.vm.run_nondet_unsafe` |
+| Primary input | Claim text + evidence URL |
+| Output | Verdict, confidence bucket, summary, material facts |
+| Verdicts | `supported`, `contradicted`, `unverifiable`, `stale` |
+| Lifecycle | `submitted` -> `resolved`; optional `challenged`; optional `archived` |
+| Bond model | Declared stake metadata, not token escrow |
 
-`challenged`
-: The submitter or owner has supplied replacement evidence and requested another review. Previous verdict fields are cleared so consumers cannot accidentally treat the old result as applying to the new evidence.
+## How Consensus Is Used
 
-`archived`
-: The owner closed the claim while preserving historical read access.
+The leader function fetches the evidence URL and asks an LLM to classify whether the evidence supports the claim. It returns normalized fields only:
 
-## Verdicts
+- `verdict`
+- `confidence`
+- `summary`
+- `material_facts`
 
-- `supported`: the evidence directly supports the claim.
-- `contradicted`: the evidence materially conflicts with the claim.
-- `unverifiable`: the evidence is missing, ambiguous, unrelated, or insufficient.
-- `stale`: the evidence is outdated for a time-sensitive claim.
+The validator does not trust the leader's JSON shape. It independently fetches the same evidence, reruns the analysis, and compares stable fields:
 
-Confidence is stored as `high`, `medium`, or `low` instead of raw scores. Buckets are more stable for validator agreement.
+1. Verdict must match exactly.
+2. Confidence may differ by one adjacent bucket, except when either side is `low`.
+3. At least two material facts must overlap enough to show both analyses relied on the same evidence.
 
-## Consensus Design
+That makes disagreement useful. If validators cannot independently arrive at a compatible result, the contract does not silently accept the leader's answer.
 
-Resolution uses `gl.vm.run_nondet_unsafe`.
+## Repository Layout
 
-The leader:
+```text
+genlayer-credibility-oracle/
+├── README.md
+├── CONTRACT.md
+├── DECISIONS.md
+├── TESTING.md
+├── LICENSE
+├── gltest.config.yaml
+├── requirements-dev.txt
+├── contracts/
+│   └── credibility_bonded_evidence_oracle.py
+├── docs/
+│   ├── integration-plan.md
+│   ├── reviewer-guide.md
+│   └── superpowers/
+│       ├── plans/
+│       └── specs/
+└── tests/
+    └── test_contract_source.ps1
+```
 
-1. Fetches the evidence URL.
-2. Sends the claim and evidence text to an LLM with `response_format="json"`.
-3. Normalizes the verdict, confidence bucket, summary, and material facts.
+The `docs/superpowers` directory records the design and implementation trail. The public review documents are `CONTRACT.md`, `DECISIONS.md`, `TESTING.md`, and the files under `docs/`.
 
-The validator:
+## Quick Verification
 
-1. Reruns the same evidence fetch and LLM analysis independently.
-2. Requires exact verdict agreement.
-3. Allows confidence to differ by one adjacent bucket, except when either side is `low`.
-4. Requires at least two material facts and enough overlap to show both outputs relied on the same evidence.
-
-This is not a schema-only validator. A leader cannot win consensus merely by returning valid JSON; validators perform their own substantive analysis.
-
-## Public Methods
-
-`submit_claim(claim_id, claim_text, evidence_url, declared_bond_atto, submitted_at)`
-: Registers a new claim. The claim text must be meaningful, the URL must be HTTP(S), the declared bond commitment must meet the minimum, and IDs cannot be reused.
-
-## Bond Semantics
-
-`declared_bond_atto` is explicit stake metadata, not token escrow. The contract records and enforces a minimum declared commitment so reviewers and integrating apps can reason about spam resistance. A production deployment that needs real slashing should pair this primitive with token escrow or a payment contract and call this oracle only after escrow has been locked.
-
-`resolve_claim(claim_id, resolved_at)`
-: Runs GenLayer consensus and stores the verdict.
-
-`challenge_claim(claim_id, new_evidence_url)`
-: Lets the submitter or owner move a resolved claim back into review with new evidence.
-
-`archive_claim(claim_id)`
-: Lets the owner archive a claim.
-
-`get_claim(claim_id)`
-: Returns all claim metadata.
-
-`get_claim_count()`
-: Returns the number of submitted claims.
-
-## Error Handling
-
-The contract uses explicit error prefixes:
-
-- `[EXPECTED]`: deterministic business rule failures.
-- `[EXTERNAL]`: stable external failures such as a 404.
-- `[TRANSIENT]`: temporary network or server failures.
-- `[LLM_ERROR]`: malformed or unusable LLM output.
-
-Validators compare expected and external failures exactly, accept transient agreement only when both sides hit transient failures, and reject LLM errors to force rotation.
-
-## Files
-
-- `contracts/credibility_bonded_evidence_oracle.py`: GenLayer contract source.
-- `tests/test_contract_source.ps1`: local source-quality tests.
-- `SUBMISSION.md`: portal-ready contribution copy.
-- `tweet.md`: English tweet draft for the quest.
-- `docs/superpowers/specs/2026-08-21-credibility-bonded-evidence-oracle-design.md`: design spec.
-- `docs/superpowers/plans/2026-08-21-credibility-oracle-implementation.md`: implementation plan.
-
-## Local Verification
-
-Run:
+On Windows PowerShell:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tests/test_contract_source.ps1
 ```
 
-Expected:
+Expected output:
 
 ```text
 Contract source checks passed.
 ```
 
-The local test checks the pinned runner header, forbidden runner aliases, expected public methods, helper functions, verdict constants, confidence constants, `run_nondet_unsafe` usage, challenge clearing, declared bond semantics, and material fact thresholds.
+The local script checks the pinned runner header, forbidden runner aliases, expected public methods, helper functions, verdict constants, confidence constants, `run_nondet_unsafe` usage, challenge clearing, declared bond semantics, and material fact thresholds.
 
-## GenVM Lint
+## GenLayer Verification
 
-The contract is written for `genvm-lint check contracts/credibility_bonded_evidence_oracle.py`, but this machine currently does not expose `python`, `pytest`, or `genvm-lint` in PATH. Before deployment, run GenVM lint in a GenLayer-ready environment:
+In a GenLayer-ready environment, run:
 
 ```bash
+pip install -r requirements-dev.txt
 genvm-lint check contracts/credibility_bonded_evidence_oracle.py
 ```
 
-## Integration Test Plan
+For live behavior, deploy to GenLayer Studio or studionet and follow [docs/integration-plan.md](docs/integration-plan.md).
 
-In GenLayer Studio or a configured GenLayer environment:
+## Status
 
-1. Deploy with a nonzero `minimum_bond_atto`.
-2. Submit a claim with a stable public evidence URL.
-3. Resolve the claim and confirm validators agree on verdict and confidence.
-4. Challenge the claim with stronger or newer evidence.
-5. Resolve again and confirm `review_count` increments and state remains readable.
-
-Recommended test claims:
-
-- Supported milestone claim with an official release note as evidence.
-- Contradicted claim where evidence says the opposite.
-- Unverifiable claim with an unrelated evidence URL.
-- Stale claim with old evidence for a time-sensitive statement.
+Built as a standalone Intelligent Contract submission artifact. Local source-quality checks pass. GenVM lint and live consensus testing should be run in a GenLayer environment before production use.
